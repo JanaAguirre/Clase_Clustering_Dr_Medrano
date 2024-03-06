@@ -33,13 +33,12 @@ pltree(aClust, cex = 0.6, hang = -1, main = "agnes Dendrogram")
 aCoeff <- aClust$ac
 rect.hclust(as.hclust(aClust), k=3, border=2:4)
 aCls3 <- cutree(as.hclust(aClust), k = 3)
-fviz_cluster(list(data = InputData, cluster = aCls3))
-
+fviz_cluster(list(data = InputData, cluster = aCls3)
 
 #==================================================================
 #Build the dendogram with Diana
 
-dClust <- diana(InputData)
+dClust <- diana(table)
 pltree(dClust, cex = 0.6, hang = -1, main = "Diana Dendrogram")
 dCoeff <- dClust$dc
 rect.hclust(as.hclust(dClust), k=3, border=2:4)

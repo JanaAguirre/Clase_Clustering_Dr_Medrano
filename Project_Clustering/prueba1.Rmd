@@ -1,0 +1,210 @@
+---
+title: "Hemagglutinin_report"
+author: "Jana A. Castañeda"
+date: "2024-03-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Proyecto Clustering 2024
+### Jana Carolina Aguirre Castañeda.
+ 2 - marzo - 2024
+
+Sobre el proyecto
+
+Este proyecto busca evidenciar las consideraciones que se deben tener al resolver un problema de clasificación de datos no supervisado "Clustering", analizando los clusters generados resultantes de diferentes métodos de agrupamiento (single,complete,average & ward) con un dataset de proteínas homólogas con previo conocimiento de los grupos que deben generarse.
+
+## Recolección de datos
+
+### Hemaglutininas
+Las secuencias de este grupo de proteínas se obtuvieron de la base de datos [NCBI Virus](https://www.ncbi.nlm.nih.gov/labs/virus/vssi/#/virus?SeqType_s=Protein) utilizando el query en la sección "Proteins" de *hemagglutinin (H1)*, *hemagglutinin (H5)* y *hemagglutinin (H6)*. Se reportan 18 subtipos de hemaglutininas en la literatura (Wu,N.C.& Wilson,I.A, 2020), sin embargo, no se encontraron secuencias de los 18 subtipos en NCBI Virus y en Uniprot no presentaban una aclaración de a qué subtipo pertenecían las secuencias por lo que no era conveniente usar estos datos para los propósitos de este proyecto. De tal forma, que se recuperaron **30 secuencias en total**:1 subtipo H1, 18 subtipo H5 y 11 subtipo H6. 
+
+## BLAST 
+
+Se reetiquetaron los archivos de las secuencias de tal modo que en los ids de cada proteína fuera claro a qué subtipo de hemaglutinina pertenecía. 
+
+```bash
+sed 's/>/>(H1)/g' H1_sequences.fasta | grep ">" | less #Verificar el resultado del nuevo etiquetado antes de generar el archivo
+sed 's/>/>(H1)/g' H1_sequences.fasta > H1_sequences_tagged.fasta
+sed 's/>/>(H5)/g' H5_sequences.fasta | grep ">" | less
+sed 's/>/>(H5)/g' H5_sequences.fasta > H5_sequences_tagged.fasta
+sed 's/>/>(H5)/g' H6_sequences.fasta | grep ">" | less
+sed 's/>/>(H5)/g' H6_sequences.fasta > H6_sequences_tagged.fasta
+```
+Ahora estos nuevos archivos fueron compilados en un único archivo llamado *all_sequences_hemagglutin.fasta*.
+
+### BLASTp MultiAlignment
+Para poder hacer el análisis de clustering, se partirá de una matriz de disimilitudes generada de un alineamiento múltiple comparando todas las secuencias entre sí. De tal modo que la base de datos en donde se busquen las secuencias debe ser el mismo archivo de las secuencias "de búsqueda". A continuación se muestra el código con el que se obtuvo el archivo de la matriz *dataframe_h.txt*. 
+
+```bash
+# Generando un archivo"masking information"
+segmasker -in all_sequences_hemagglutin.fasta -out datbase_hem.asnb -infmt fasta -parse_seqids -outfmt 'maskinfo_asn1_bin'
+
+# Generando un "database" a partir del archivo "masking information"
+
+makeblastdb -in all_sequences_hemagglutin.fasta -dbtype prot -input_type fasta -parse_seqids -mask_data datbase_hem.asnb -out database_h -title \ "Database_Hemagglutinin"
+```
+
+### Búsqueda
+```bash
+blastp -query all_sequences_hemagglutin.fasta -db database_h -db_soft_mask 21 \ -out Hem.out -max_hsps 1 -outfmt 7 \ -use_sw_tback
+```
+```bash
+grep -v "#" Hem.out | cut -f1,2,12 > dataframe_h.txt #Obteniendo los ids y los bits_scores las comparaciones de BLASTp 
+```
+### Matriz de disimilitudes estandarizada
+
+El archivo dataframe_h.txt resultante de BLASTp no tiene una estructura de matriz, por lo que se hace la restructuracción del archivo para poder aplicar sobre los datos los diferentes métodos de agrupamiento de clustering en RStudio. 
+```{r}
+# Importando el dataframe del blastp
+df <- read.delim("~/Clase_Clustering_Dr_Medrano/Project_Clustering/dataframe_h.txt", header=FALSE)
+
+# Cambiando el nombre de las columnas
+colnames(df) <- c( V1= "prot_origin", V2= "to_protein", V3= "bit_scores")
+
+# Creando la matriz
+library(tidyr)
+library(textshape)
+matx <- df
+  matx <- spread(matx,key=to_protein, value=bit_scores)
+  matx <- column_to_rownames(matx, "prot_origin")
+  matx <- as.matrix(matx)
+  
+# Normalización de bitscores
+  matx <- matx/max(matx)
+  matx <- 1-matx
+  matx <- as.dist(matx)
+  matx_df <- as.matrix(matx)
+```
+
+ **Matriz de disimilitudes**
+```{r pressure, echo=FALSE}
+  library("pheatmap")
+  pheatmap(
+    matx_df,
+    cluster_rows = FALSE,
+    cluster_cols = FALSE,
+    show_rownames = TRUE,
+    show_colnames = TRUE,
+    display_numbers = TRUE,
+    fontsize_row = 6,
+    fontsize_col = 6,
+    fontsize_number = 6
+  )
+```
+
+A partir de este heatmap ya se vuelven más evidentes las relaciones entre cada una de las proteínas. Considerando las etiquetas en los nombres de los IDs se puede observar que el bloque azul de la esquina superior izquierda corresponde a proteínas del subtipo H5 comparadas entre sí, quienes tienen valores de disimilitudes bajos. Mientras que al comparar a este grupo con las proteínas del subtipo H6 el valor de disimilitud incrementa dando paso a los bloques rojos con valores de alrededor de 0.6. También se observa que la proteína del subtipo H1 tiene una secuencia muy distinta al de cualquiera de los dos grupos, visualmente evidenciado como los bordes más rojizos del heatmap.A parte de esta proteína, la proteína **(H5)AAK57506.2** también tiene una secuencia que difiere notablemente tanto de reto de las proteínas del subtipo H5 y H6. Así mismo, es evidente que a pesar de los bajos valores de disimilitudes entre las proteínas del subtipo H6 hay menos secuencias conservadas que en las secuencias del subtipo H5. 
+
+## Clustering jerárquico 
+
+### Determinando el número de clusters
+ 
+Debido a que la visualización inmediata de las datos es díficil (debido al número de dimensiones para cada variable del dataset) y por lo tanto ver su disposición espacial claramente para observar si hay alguna tendencia en el agrupamiento de los datos no es posible, la primera aproximación para determinar cuántos clusters podrían existir se determinarán utilizando los métodos de "Elbow" y "Silhouette". 
+
+```{r eval=FALSE, include=FALSE}
+# Determinar el número de clusters con Elbow y Silhouette
+
+# Elbow
+  fviz_nbclust(matx_df, FUN = hcut, hc_method = "average", method = "wss", k.max = 5) +
+    labs(subtitle = "The Elbow Method")
+  fviz_nbclust(matx_df, FUN = hcut, hc_method = "complete", method = "wss", k.max = 5) +
+    labs(subtitle = "The Elbow Method")
+  fviz_nbclust(matx_df, FUN = hcut, hc_method = "single", method = "wss", k.max = 5) +
+     labs(subtitle = "The Elbow Method")
+  fviz_nbclust(matx_df, FUN = hcut, hc_method = "average", method = "wss", k.max = 5) +
+     labs(subtitle = "The Elbow Method")
+# Silhouette
+   fviz_nbclust(matx_df, FUN = hcut, hc_func = "hclust", hc_method = "ward.D2", method = "silhouette", k.max = 7) +
+    labs(subtitle = "Silhouette method")
+   fviz_nbclust(matx_df, FUN = hcut, hc_func = "hclust", hc_method = "complete", method = "silhouette", k.max = 7) +
+     labs(subtitle = "Silhouette method")
+   fviz_nbclust(matx_df, FUN = hcut, hc_func = "hclust", hc_method = "average", method = "silhouette", k.max = 7) +
+     labs(subtitle = "Silhouette method")
+   fviz_nbclust(matx_df, FUN = hcut, hc_func = "hclust", hc_method = "single", method = "silhouette", k.max = 7) +
+     labs(subtitle = "Silhouette method")
+```
+#### Método de Elbow
+!(elbow_plots)["plots_&_figures\elbow_all_methods.png"]
+
+#### Método de Silhouette
+!(silhouette_plots)["plots_&_figures\silhouette_all_methods.png"]
+
+### hclust
+```{r eval=FALSE, include=FALSE}
+
+# Clustering jerarquico utilizando el método complete,
+# single-linkage, average y ward. Elección de método
+
+  ccom <- hclust(dist(matx), method = "complete")
+  csing <- hclust(dist(matx), method = "single")
+  cav <- hclust(dist(matx), method = "average")
+  cward <- hclust(dist(matx), method = "ward.D2")
+
+  par(mfrow = c(1,4))
+  plot (ccom, hang = -1)
+  plot (cward, hang = -1)
+  plot (csing, hang = -1)
+  plot (cav, hang = -1)
+
+```
+!(hclust_comparative)["plots_&_figures\hclust_All_methods.png"]
+
+### Comparación de agnes y hclust
+
+```{r echo=FALSE}
+  #Método complete
+
+  aClust <- agnes(matx, method = "complete")
+  pltree(aClust, cex = 0.6, hang = -1, main = "agnes complete Dendrogram")
+
+  plot (ccom, hang = -1)
+  #Método ward
+
+  dClust <- agnes(matx, method = "ward")
+  pltree(dClust, cex = 0.6, hang = -1, main = "agnes ward.D2 Dendrogram2")
+
+  plot (cward, hang = -1)
+```
+
+### Scatter plot para visualizar los puntos en cada cluster
+```{r}
+cls3 <- cutree(ccom, k=3)
+  plot(matx_df, col=cls3)
+  fviz_cluster(list(data = matx, cluster = cls3))
+
+  cls3_ward <- cutree(cward, k=3)
+  plot(cward, xlim=c(0,8), ylim=c(0,8), col=cls3_ward)
+  fviz_cluster(list(data = matx, cluster = cls3_ward))
+
+  # Corte de los dendogramas en el número de clusters identificados
+  rect.hclust(ccom, k=2, border=2:4)
+  rect.hclust(csing, k=3, border=2:4)
+  rect.hclust(cav, k=3, border=2:4)
+  rect.hclust(cward, k=3, border=2:4)
+```
+
+### Aglomerrative coefficient (coeficiente de aglomeración)
+```{r}
+# "Agglomerative coefficients"
+  coeff_ccom <- coef(ccom)
+  coeff_csing <- coef(csing)
+  coeff_cav <- coef(cav)
+  coeff_cward <- coef(cward)
+```
+
+### Dendrogramas (Newick)
+
+```{r}
+# Guardar los dendogramas en un formato Newick
+  my_tree <- as.phylo(ccom)
+  write.tree(phy=my_tree, file="ccom_hclust.tree")
+  my_tree <- as.phylo(csing)
+  write.tree(phy=my_tree, file="csing_hclust.tree")
+  my_tree <- as.phylo(cav)
+  write.tree(phy=my_tree, file="cav_hclust.tree")
+  my_tree <- as.phylo(cward)
+  write.tree(phy=my_tree, file="cward_hclust.tree")
+```
