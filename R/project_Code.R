@@ -38,6 +38,8 @@ matx <- df
   suppressPackageStartupMessages(library(dendextend))
   suppressPackageStartupMessages(library(ape))
   library(Rmisc)
+  library(lattice)
+  library(plyr)
 
 # PCA
   pca_resultados <- prcomp(matx_df)

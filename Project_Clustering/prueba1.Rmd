@@ -2,7 +2,9 @@
 title: "Hemagglutinin_report"
 author: "Jana A. Castañeda"
 date: "2024-03-02"
-output: html_document
+output:
+  pdf_document: default
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -143,7 +145,7 @@ Debido a que la visualización inmediata de las datos es díficil (debido al nú
   cav <- hclust(dist(matx), method = "average")
   cward <- hclust(dist(matx), method = "ward.D2")
 
-  par(mfrow = c(1,4))
+  par(mfrow = c(1,2))
   plot (ccom, hang = -1)
   plot (cward, hang = -1)
   plot (csing, hang = -1)
@@ -208,3 +210,4 @@ cls3 <- cutree(ccom, k=3)
   my_tree <- as.phylo(cward)
   write.tree(phy=my_tree, file="cward_hclust.tree")
 ```
+![ccom tree]("Clase_Clustering_Dr_Medrano/cward_hclust.tree")
