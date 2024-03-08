@@ -36,7 +36,6 @@ matx <- df
   library(cluster)
   suppressPackageStartupMessages(library(factoextra))
   suppressPackageStartupMessages(library(dendextend))
-  suppressPackageStartupMessages(library(ape))
   library(Rmisc)
   library(lattice)
   library(plyr)
@@ -98,12 +97,10 @@ matx <- df
   #Scatter plot para visualizar los puntos en cada cluster
 
   cls3 <- cutree(ccom, k=3)
-  plot(matx_df, col=cls3)
-  fviz_cluster(list(data = matx, cluster = cls3))
+  fviz_cluster(list(data = matx_df, cluster = cls3))
 
   cls3_ward <- cutree(cward, k=3)
-  plot(cward, xlim=c(0,8), ylim=c(0,8), col=cls3_ward)
-  fviz_cluster(list(data = matx, cluster = cls3_ward))
+  fviz_cluster(list(data = matx_df, cluster = cls3_ward))
 
   # Corte de los dendogramas en el número de clusters identificados
   rect.hclust(ccom, k=2, border=2:4)

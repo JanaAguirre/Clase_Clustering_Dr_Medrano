@@ -1,0 +1,314 @@
+---
+title: "Hemagglutinin_report"
+author: "Jana A. Castañeda"
+date: "2024-03-02"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Proyecto Clustering 2024
+### Jana Carolina Aguirre Castañeda.
+ 2 - marzo - 2024
+
+**Sobre el proyecto**
+
+Este proyecto busca evidenciar las consideraciones que se deben tener al resolver un problema de clasificación de datos no supervisado "Clustering", analizando los clusters generados resultantes de diferentes métodos de agrupamiento (single,complete,average & ward) con un dataset de proteínas homólogas con previo conocimiento de los grupos que deben generarse.
+
+## Introducción 
+
+Los problemas de clasificación se presentan tanto en escenarios cotidianos como en ámbitos científicos, el agrupamiento de objetos permite obtener información sobre las características de estos y de allí obtener conocimiento que por un lado *describa* a estos objetos y por otro ayude a *predecir* ciertos comportamientos o patrones. Lo anterior se lleva a cabo convergiendo estrategias estadísticas, informáticas, matemáticas e incluso de inteligencia articial dando paso a lo que se conoce como **MINERÍA DE DATOS**. Para poder llevar acabo la clasificación es indispensable definir los párametros que se utilizarán para asentar similitud y diferencia. Una vez definidos, para el caso de variables numéricas o cuantitativas se puede estimar que tan similares son dos observaciones (y de manera indirecta su disimilitud) calculando la distancia entre cada una de estas variables y aquellos puntos con menores distancias se agrupan juntos. Lo que se acaba de describir es la metodología básica para generar clusters jerárquico, en ciencias biológicas las observaciones pueden incluir datos de expresión diferencial, bit scores resultantes de un alineamiento de secuencias, medición de la producción de un metabolito, etc. Sin embargo, los grupos de datos a evaluar pueden agruparse siguiendo el algoritmo anterior si necesidad de que haya grupos intrínsecos en los datos. Esta es una de las mayores consideraciones que se debe tener al realizar este tipo de ánalisis, los algoritmos de clustering generan falsos agrupamientos en datos sin clases "nativas". Por lo tanto, es responsabilidad del investigador que está realizando el análisis tener evidencia previa de que existen clases, se requiere un conocimiento sólido del origen y las propiedades biológicas de los datos en cuestión ya que estos serán parámetros medulares en la evaluación de los agrupamientos resultantes. Es verdad que existen coeficientes de agrupamiento que nos hablan de la homogeneidad dentro de cada grupo, sin embargo, dependiendo el tamaño de la muestra y de la desviación estándar de los datos, pueden generarse clusters homogéneos con base en parámetros estadísticos pero que alberguen elementos que biológicamente no sea coherentes. Para esto es bueno tener un control de observaciones que hagan evidente que el agrupamiento coincide con lo esperado biológicamente. 
+
+Otra consideración que se deben tener es que algunos algoritmos de clustering como (k-means e incluso clustering jerárquicos) tienen problemas cuando observaciones están a la misma distancia de dos grupos o clusters. Aquí dependiendo las veces que se corra el algoritmo puede asignarlo a uno u a otro grupo de manera aleatoria y por lo tanto la decisión final de a qué grupo pertenece recae en las conclusiones del investigador. 
+
+Por otro lado, el método de agrupamiento que se utilice impacta no solo en los grupos que se puedan formar si no en las distancias aparentes entre los clusters y en la capacidad de poder interpretar la información que se puede obtener debido a que algunas metodologías generan dendrogramas ilegibles.
+
+En conclusión, el análisis de datos utilizando clustering no tiene parámetros fijos o generales capaces de ser aplicados a cualquier caso para obtener una clasificación robusta, todos los parámetros (el algoritmo de agrupamiento, el tipo de distancia, etc.) cambian en función de las características de los datos tanto estadísticas como biológicas y el criterio del investigador define pivotalmente que tan relevantes, plausibles y robustos son los grupos.  
+
+## Recolección de datos
+
+### Hemaglutininas
+Las secuencias de este grupo de proteínas se obtuvieron de la base de datos [NCBI Virus](https://www.ncbi.nlm.nih.gov/labs/virus/vssi/#/virus?SeqType_s=Protein) utilizando el query en la sección "Proteins" de *hemagglutinin (H1)*, *hemagglutinin (H5)* y *hemagglutinin (H6)*. Se reportan 18 subtipos de hemaglutininas en la literatura (Wu,N.C.& Wilson,I.A, 2020), sin embargo, no se encontraron secuencias de los 18 subtipos en NCBI Virus y en Uniprot no presentaban una aclaración de a qué subtipo pertenecían las secuencias por lo que no era conveniente usar estos datos para los propósitos de este proyecto. De tal forma, que se recuperaron **30 secuencias en total**:1 subtipo H1, 18 subtipo H5 y 11 subtipo H6. 
+
+## BLAST 
+
+Se reetiquetaron los archivos de las secuencias de tal modo que en los ids de cada proteína fuera claro a qué subtipo de hemaglutinina pertenecía. 
+
+```bash
+sed 's/>/>(H1)/g' H1_sequences.fasta | grep ">" | less #Verificar el resultado del nuevo etiquetado antes de generar el archivo
+sed 's/>/>(H1)/g' H1_sequences.fasta > H1_sequences_tagged.fasta
+sed 's/>/>(H5)/g' H5_sequences.fasta | grep ">" | less
+sed 's/>/>(H5)/g' H5_sequences.fasta > H5_sequences_tagged.fasta
+sed 's/>/>(H5)/g' H6_sequences.fasta | grep ">" | less
+sed 's/>/>(H5)/g' H6_sequences.fasta > H6_sequences_tagged.fasta
+```
+Ahora estos nuevos archivos fueron compilados en un único archivo llamado *all_sequences_hemagglutin.fasta*.
+
+### BLASTp MultiAlignment
+Para poder hacer el análisis de clustering, se partirá de una matriz de disimilitudes generada de un alineamiento múltiple comparando todas las secuencias entre sí. De tal modo que la base de datos en donde se busquen las secuencias debe ser el mismo archivo de las secuencias "de búsqueda". A continuación se muestra el código con el que se obtuvo el archivo de la matriz *dataframe_h.txt*. 
+
+```bash
+# Generando un archivo"masking information"
+segmasker -in all_sequences_hemagglutin.fasta -out datbase_hem.asnb -infmt fasta -parse_seqids -outfmt 'maskinfo_asn1_bin'
+
+# Generando un "database" a partir del archivo "masking information"
+
+makeblastdb -in all_sequences_hemagglutin.fasta -dbtype prot -input_type fasta -parse_seqids -mask_data datbase_hem.asnb -out database_h -title \ "Database_Hemagglutinin"
+```
+
+### Búsqueda
+```bash
+blastp -query all_sequences_hemagglutin.fasta -db database_h -db_soft_mask 21 \ -out Hem.out -max_hsps 1 -outfmt 7 \ -use_sw_tback
+```
+```bash
+grep -v "#" Hem.out | cut -f1,2,12 > dataframe_h.txt #Obteniendo los ids y los bits_scores las comparaciones de BLASTp 
+```
+### Matriz de disimilitudes estandarizada
+
+El archivo dataframe_h.txt resultante de BLASTp no tiene una estructura de matriz, por lo que se hace la restructuracción del archivo para poder aplicar sobre los datos los diferentes métodos de agrupamiento de clustering en RStudio. 
+```{r}
+# Importando el dataframe del blastp
+df <- read.delim("~/Clase_Clustering_Dr_Medrano/Project_Clustering/dataframe_h.txt", header=FALSE)
+
+# Cambiando el nombre de las columnas
+colnames(df) <- c( V1= "prot_origin", V2= "to_protein", V3= "bit_scores")
+
+# Creando la matriz
+library(tidyr)
+library(textshape)
+matx <- df
+  matx <- spread(matx,key=to_protein, value=bit_scores)
+  matx <- column_to_rownames(matx, "prot_origin")
+  matx <- as.matrix(matx)
+  
+# Normalización de bitscores
+  matx <- matx/max(matx)
+  matx <- 1-matx
+  matx <- as.dist(matx)
+  matx_df <- as.matrix(matx)
+```
+
+ **Matriz de disimilitudes**
+```{r pressure, echo=FALSE}
+  library("pheatmap")
+  pheatmap(
+    matx_df,
+    cluster_rows = FALSE,
+    cluster_cols = FALSE,
+    show_rownames = TRUE,
+    show_colnames = TRUE,
+    display_numbers = TRUE,
+    fontsize_row = 6,
+    fontsize_col = 6,
+    fontsize_number = 6
+  )
+```
+
+A partir de este heatmap ya se vuelven más evidentes las relaciones entre cada una de las proteínas. Considerando las etiquetas en los nombres de los IDs se puede observar que el bloque azul de la esquina superior izquierda corresponde a proteínas del subtipo H5 comparadas entre sí, quienes tienen valores de disimilitudes bajos. Mientras que al comparar a este grupo con las proteínas del subtipo H6 el valor de disimilitud incrementa dando paso a los bloques rojos con valores de alrededor de 0.6. También se observa que la proteína del subtipo H1 tiene una secuencia muy distinta al de cualquiera de los dos grupos, visualmente evidenciado como los bordes más rojizos del heatmap.A parte de esta proteína, la proteína **(H5)AAK57506.2** también tiene una secuencia que difiere notablemente tanto de reto de las proteínas del subtipo H5 y H6. Así mismo, es evidente que a pesar de los bajos valores de disimilitudes entre las proteínas del subtipo H6 hay menos secuencias conservadas que en las secuencias del subtipo H5. 
+
+## Clustering jerárquico 
+
+### Determinando el número de clusters
+ 
+Debido a que la visualización inmediata de las datos es díficil (debido al número de dimensiones para cada variable del dataset) y por lo tanto ver su disposición espacial claramente para observar si hay alguna tendencia en el agrupamiento de los datos no es posible, la primera aproximación para determinar cuántos clusters podrían existir se determinarán utilizando los métodos de "Elbow" y "Silhouette". 
+
+```{r eval=FALSE, include=FALSE}
+# Determinar el número de clusters con Elbow y Silhouette
+
+# Elbow
+  fviz_nbclust(matx_df, FUN = hcut, hc_method = "average", method = "wss", k.max = 5) +
+    labs(subtitle = "The Elbow Method")
+  fviz_nbclust(matx_df, FUN = hcut, hc_method = "complete", method = "wss", k.max = 5) +
+    labs(subtitle = "The Elbow Method")
+  fviz_nbclust(matx_df, FUN = hcut, hc_method = "single", method = "wss", k.max = 5) +
+     labs(subtitle = "The Elbow Method")
+  fviz_nbclust(matx_df, FUN = hcut, hc_method = "average", method = "wss", k.max = 5) +
+     labs(subtitle = "The Elbow Method")
+# Silhouette
+   fviz_nbclust(matx_df, FUN = hcut, hc_func = "hclust", hc_method = "ward.D2", method = "silhouette", k.max = 7) +
+    labs(subtitle = "Silhouette method")
+   fviz_nbclust(matx_df, FUN = hcut, hc_func = "hclust", hc_method = "complete", method = "silhouette", k.max = 7) +
+     labs(subtitle = "Silhouette method")
+   fviz_nbclust(matx_df, FUN = hcut, hc_func = "hclust", hc_method = "average", method = "silhouette", k.max = 7) +
+     labs(subtitle = "Silhouette method")
+   fviz_nbclust(matx_df, FUN = hcut, hc_func = "hclust", hc_method = "single", method = "silhouette", k.max = 7) +
+     labs(subtitle = "Silhouette method")
+```
+
+#### **Método de Elbow**
+
+```{r echo=FALSE, fig.align='center', fig.cap='', out.width="800px"}
+knitr::include_graphics(rep("C:/Users/Acer/Documents/Clase_Clustering_Dr_Medrano/plots_&_figures/elbow_all_methods.png"))
+```
+
+Sin importar el método de distancia utilizado para evaluar la similitud entre clusters (single-linkage, complete, average o ward), el método de Elbow sugiere que al generar 2 clusters se minimiza la suma de desviaciones estándar o de los errores en todo nuestro universo evaluado. 
+
+#### **Método de Silhouette**
+```{r echo=FALSE, fig.align='center', fig.cap='', out.width="800px"}
+knitr::include_graphics(rep("C:/Users/Acer/Documents/Clase_Clustering_Dr_Medrano/plots_&_figures/silhouette_all_methods.png"))
+```
+
+Así mismo, el coeficiente de silueta o silhuoette sugiere que al generar 2 clusters la distancia entre los puntos dentro de cada uno de los clusters y clusters distintos es mayor que la distancia máxima que pudiese existir entre los dos puntos más alejadas de un mismo cluster.
+
+### hclust
+```{r eval=FALSE, include=FALSE}
+
+# Clustering jerarquico utilizando el método complete,
+# single-linkage, average y ward. Elección de método
+
+library(cluster)
+suppressPackageStartupMessages(library(factoextra))
+suppressPackageStartupMessages(library(dendextend))
+suppressPackageStartupMessages(library(ape))
+library(Rmisc)
+library(lattice)
+library(plyr)
+  
+ccom <- hclust(dist(matx), method = "complete")
+csing <- hclust(dist(matx), method = "single")
+cav <- hclust(dist(matx), method = "average")
+cward <- hclust(dist(matx), method = "ward.D2")
+
+par(mfrow = c(1,2))
+plot (ccom, hang = -1)
+plot (cward, hang = -1)
+plot (csing, hang = -1)
+plot (cav, hang = -1)
+
+```
+
+```{r echo=FALSE, fig.align='center', fig.cap='', out.width="800px"}
+knitr::include_graphics(rep("C:/Users/Acer/Documents/Clase_Clustering_Dr_Medrano/plots_&_figures/hclust_All_methods.png"))
+```
+
+Al observar los 4 dendrogramas se puede apreciar que en concordancia con los resultados del método de elbow y silueta se generan dos grupos principales de proteínas, uno en donde se clasificaron la mayoría de las hemaglutininas del subtipo H5 y otro en donde se encuentran las proteínas del subtipo H6, dos outliers del H5 y la proteína del subtipo H1. Este agrupamiento es consistente con lo observado en el heatmap que se creó en un inicio, en donde se remarcó que las diferencias entre todas las proteínas del grupo H6 eran muy bajas y los valores de distancia era homogéneos, así mismo este fenómeno se observaba en el suptipo H5. Uno de los outliers de H5 se agrupa consistentemente con la única hemaglutinina del grupo H1 y sin importar el método aparece en el mismo grupo. Dado que parece que el grupo de hemaglutininas evaluadas están formando grupos con evidente homogeneidad (conclusiones derivadas de las distancias y posiciones casi equivalentes para cada proteína H6 y H5) se evaluará el coeficiente de aglomeración y el clustering jerárquico que se genera agnes con estos datos. 
+
+### Aglomerative coefficient (coeficiente de aglomeración)
+```{r echo=FALSE}
+# "Agglomerative coefficients"
+
+library(stats)
+library(cluster)
+
+ccom <- hclust(dist(matx), method = "complete")
+csing <- hclust(dist(matx), method = "single")
+cav <- hclust(dist(matx), method = "average")
+cward <- hclust(dist(matx), method = "ward.D2")
+
+coeff_ccom <- coef(ccom)
+coeff_csing <- coef(csing)
+coeff_cav <- coef(cav)
+coeff_cward <- coef(cward)
+
+paste("método complete:", coeff_ccom)
+paste("método average:", coeff_cav)
+paste("método single-linkage:", coeff_csing)
+paste("método ward:", coeff_cward)
+```
+Los coeficientes más altos provienen del método complete y ward, lo que indica que con estos métodos los clusters generados tienen una mayor homogeneidad dentro de sí que con los otros dos métodos. Por lo que estos dos métodos se seguirán evaluando a lo largo de este proceso para asentar el mejor agrupamiento para representar los subtipos de hemaglutininas.  
+
+### Comparación de agnes y hclust
+
+Dado que con los cuatro métodos las agrupaciones de los dendrogramas son básicamente las mismas con la diferencia entre los valores de distancia entre cada cluster (resultado de los algoritmos que utilizan para medir la distancia) se procede a comparar el agrupamiento de hclust y agnes con el fin de buscar si esta función permite develar más información de las hemaglutininas. 
+
+```{r eval=FALSE, include=FALSE}
+library(cluster)
+#Método complete
+
+ccom <- hclust(dist(matx), method = "complete")
+aClust <- agnes(matx, method = "complete")
+pltree(aClust, cex = 0.6, hang = -1, main = "agnes complete Dendrogram")
+
+plot(ccom, hang = -1)
+
+#Método ward
+cward <- hclust(dist(matx), method = "ward.D2")
+dClust <- agnes(matx, method = "ward")
+pltree(dClust, cex = 0.6, hang = -1, main = "agnes ward.D2 Dendrogram2")
+
+plot(cward, hang = -1)
+```
+#### Complete agnes vs hclust
+
+Al observar los pares de dendrogramas utilizando el mismo método de agrupamiento, podemos ver que los resultados de agrupamiento son distintos dependiendo la función que se ocupe. Agnes utilizando el método complete logra resolver que la proteína del subtipo H1 y la H5AAK57506.2 son proteínas muy distinta del resto y decide no agruparla con ninguna otra al mismo nivel. Más aún, agnes permite separar la otra proteína H5 cuyo valor de disimilitud (mostrado en la matriz de bitscores) se asemeja al del grupo H6 pero no la clasifica como del grupo. Gracias a las etiquetas de los IDs podemos evidenciar que uno de los problemas es que separa proteínas del grupo H6 que deberían estar juntas. Por otro lado, hclust sí agrupa a todas las H6 en el mismo clado y parece que el grupo de H5 se mantiene cercano también, sin embargo incluso con el método complete hclust no logra diferenciar que H1 y H5 no pertenecen al mismo subtipo. 
+
+#### Ward agnes vs hclust
+
+Al minimizar la desviación estándar dentro de cada cluster la cercanía entre la proteína H1 y la H5 atípica se promueve con ambas funciones. Aquí una de las diferencias más notables es la distancia entre los grupos H5 y H6 que identifica agnes y hclust, en hclust las distancias entre estos dos clusters tiene una escala que abarca hasta 8 unidades mientras que agnes tiene como valor máximo valores un poco más arriba de 1.5. 
+
+### Scatter plot para visualizar los puntos en cada cluster
+
+A pesar de que los métodos "Elbow" y "Sillouette" predicen 2 clusters como la mejor solución, aspecto que concuerda con los dos clusters principales que se observan en los dendogramas con hclust y agnes, el hecho de que solo se tenga una proteína del subtipo de hemaglutinina H1 sesga este resultado. Dado que las proteínas que se evaluaron son de tres subtipos distintos y no 2, esta justificación biológica motiva a dividir en 3 clusters en vez de dos.   
+
+```{r echo=FALSE}
+suppressPackageStartupMessages(library(factoextra))
+library(stats)
+
+ccom <- hclust(dist(matx), method = "complete")
+cls3 <- cutree(ccom, k=3)
+fviz_cluster(list(data = matx_df, cluster = cls3))
+
+cward <- hclust(dist(matx), method = "ward.D2")
+cls3_ward <- cutree(cward, k=3)
+fviz_cluster(list(data = matx_df, cluster = cls3_ward))
+```
+
+Estos gráficos evidencian claramente que determinar 3 clusters como la mejor solución es una decisión no solo fundamentada por el conocimiento previo que se tiene de los datos si no que también es posible observarlo en los datos. Lo anterior demuestra que la manera de presentar las observaciones determina que información se puede extraer de ellos, este aspecto es clave para el ** Data Mining **.  Podemos observar como el método complete está captando mejor la identidad de la proteína H5 que se encuentra casi equidistante a los 3 clusters (Gráfica 1), sin embargo de manera paradójica en el dendrograma con hclust con el método de ward sí se incluye la proteína H5AAD13569.1. 
+
+```{r}
+# Corte de los dendogramas en el número de clusters identificados
+plot (ccom, hang = -1)
+rect.hclust(ccom, k=3, border=2:4)
+plot (cward, hang = -1)
+rect.hclust(cward, k=3, border=2:4)
+```
+
+Al dividir los dendrogramas en los 3 clusters planteados, los grupos resultantes tienen un sentido biológico con ambos métodos. 
+
+### Dendrogramas (Newick)
+
+```{r eval=FALSE, include=FALSE}
+# Guardar los dendogramas en un formato Newick
+suppressPackageStartupMessages(library(ape))
+  my_tree <- as.phylo(ccom)
+  write.tree(phy=my_tree, file="ccom_hclust.tree")
+  my_tree <- as.phylo(csing)
+  write.tree(phy=my_tree, file="csing_hclust.tree")
+  my_tree <- as.phylo(cav)
+  write.tree(phy=my_tree, file="cav_hclust.tree")
+  my_tree <- as.phylo(cward)
+  write.tree(phy=my_tree, file="cward_hclust.tree")
+```
+
+### Average Tree
+
+```{r echo=FALSE, fig.align='center', fig.cap='', out.width="800px"}
+knitr::include_graphics(rep("C:/Users/Acer/Documents/Clase_Clustering_Dr_Medrano/plots_&_figures/cav_hclust.tree.png"))
+```
+
+### Complete Tree
+```{r echo=FALSE, fig.align='center', fig.cap='', out.width="800px"}
+knitr::include_graphics(rep("C:/Users/Acer/Documents/Clase_Clustering_Dr_Medrano/plots_&_figures/ccom_hclust.tree_ready.png"))
+```
+
+### Single Tree
+
+```{r echo=FALSE, fig.align='center', fig.cap='', out.width="800px"}
+knitr::include_graphics(rep("C:/Users/Acer/Documents/Clase_Clustering_Dr_Medrano/plots_&_figures/csing_hclust.tree.png"))
+```
+
+### Ward 
+
+```{r echo=FALSE, fig.align='center', fig.cap='', out.width="800px"}
+knitr::include_graphics(rep("C:/Users/Acer/Documents/Clase_Clustering_Dr_Medrano/plots_&_figures/cward_hclust.tree.png"))
+```
+
+### CONCLUSIONES
+
+A lo largo de este análisis se encontró que los métodos que generaban clusters con mayor homogeneidad fueron el método complete y el ward con coeficientes de 0.9012165805229 y 0.961648245415423 respectivamente. A pesar de que con el método de ward hay mayor homogeneidad en los grupos, biológicamente el método complete identifica que la proteína H5 pertenece al cluster H5 y no al H6. Por otro lado, aunque el número de clusters sugeridos es 2 por el sesgo que generan las pocas observaciones de H1 se plantea que número de clusters con mayor relevancia biológica es 3. Por último, se evidencio como el uso de diferentes funciones para generar los dendrogramas impacta en el agrupamiento y se encontró una solución en donde el método complete sí lograba identificar a la proteína H1 como una proteína de un grupo distinto. Todas estas conclusiones son fruto de la interpretación estadística de los datos, así como su visualización en el plano aunado a una critica biológica resultante del conocimiento previo de los datos.  
+
+
